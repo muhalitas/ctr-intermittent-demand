@@ -1,0 +1,6 @@
+,Median MAE,Difference vs per-SKU %
+per-SKU tau* (proposed),0.5463750618367107,0.0
+fixed tau = 0.30,0.7028433806134969,28.64
+fixed tau = 0.40,0.6074441798773007,11.18
+fixed tau = 0.50,0.55041628,0.74
+fixed tau = 0.43,0.586880317177914,7.41
