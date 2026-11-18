@@ -1,0 +1,9 @@
+M5/*.csv
+M5/*.zip
+M5/prep/*.npy
+M5/prep/*.csv
+M5/prep/prep_meta.json
+Veri/*.csv
+*.log
+__pycache__/
+.venv/
