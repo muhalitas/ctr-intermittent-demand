@@ -21,8 +21,8 @@ import pandas as pd
 import numpy as np
 import os
 
-INPUT  = "/sessions/loving-clever-volta/mnt/My Drive/doktora/Veri/filtered_data.csv"
-OUTPUT = "/sessions/loving-clever-volta/mnt/outputs/sb_classification_definitive.csv"
+INPUT  = "Veri/filtered_data.csv"
+OUTPUT = "sb_classification_definitive.csv"
 
 print(f"Loading {INPUT} ...")
 df = pd.read_csv(INPUT, usecols=["URUNID", "Date", "Satis Adet"])
