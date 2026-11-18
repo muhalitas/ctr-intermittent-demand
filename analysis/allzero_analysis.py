@@ -16,8 +16,8 @@ TOL = 1e-9
 CFG = {
  'BTM': dict(comb=f'{ROOT}/Son2.py_sonuclar/combined_results.csv',
              pred=f'{ROOT}/Son2.py_sonuclar/ctr_predictions.csv', pcol='CTR_Predictions', ctr='CTR'),
- 'M5':  dict(comb=f'{ROOT}/M5/sonuc_m5/combined_results.csv',
-             pred=f'{ROOT}/M5/sonuc_m5/predictions.csv', pcol='CTR_pred', ctr='CTR'),
+ 'M5':  dict(comb=f'{ROOT}/M5/results_m5/combined_results.csv',
+             pred=f'{ROOT}/M5/results_m5/predictions.csv', pcol='CTR_pred', ctr='CTR'),
 }
 
 def boot_ci(d, fn, B=2000):
