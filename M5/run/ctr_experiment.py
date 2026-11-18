@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-CTR deneyi - son2.py'nin birebir portu, paralel + devam ettirilebilir.
+CTR experiment on the M5 data - parallel and resumable.
 
-Modelde, hiperparametrede, bolunmede, esik aramasinda VEYA metrik
-tanimlarinda hicbir degisiklik yoktur. Degisen sadece sunlar:
-  1) SKU'lar surec havuzunda paralel islenir (her isci tek is parcacigi)
-  2) veri her SKU icin tam tarama yerine onceden gruplanir
-  3) sonuclar parcalar halinde yazilir -> is yarida kesilirse kaldigi yerden devam
+The model, hyperparameters, data split, threshold search and metric
+definitions are identical to those used in the paper. This script only adds:
+  1) SKUs are processed in parallel in a process pool (one thread per worker)
+  2) data are grouped per SKU in advance instead of being scanned each time
+  3) results are written in parts -> an interrupted run resumes where it stopped
 
-Kullanim:
-  python3 ctr_experiment.py --dataset m5  --out SONUC_DIZINI [--limit N] [--workers K]
-  python3 ctr_experiment.py --dataset btm --out SONUC_DIZINI [--limit N] [--workers K]
+Usage:
+  python3 ctr_experiment.py --dataset m5 --out RESULTS_DIR [--limit N] [--workers K]
 """
 import os, sys, gc, json, time, argparse, warnings
 warnings.filterwarnings('ignore')
@@ -22,15 +21,14 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 M5_PREP = os.path.abspath(os.path.join(HERE, '..', 'prep'))
-BTM_CSV = os.path.abspath(os.path.join(HERE, '..', '..', 'Veri', 'filtered_data.csv'))
 
 TIME_STEPS = 7
 ALPHA_LEVELS = np.linspace(0.01, 0.99, 50)
 SEED = 42
-SPE = 32                        # Keras adim toplulastirma (gradyan sirasini degistirmez)
-CHUNK = 25                      # kac SKU'da bir diske yaz
+SPE = 32                        # Keras steps_per_execution (does not change gradient order)
+CHUNK = 25                      # number of SKUs per task (results written to disk after each)
 
-# ----------------------------------------------------------------- metrikler
+# ----------------------------------------------------------------- metrics
 def mase(y_true, y_pred, y_train):
     ne = np.abs(y_train[1:] - y_train[:-1])
     scale = np.mean(ne) if len(ne) > 0 and np.mean(ne) != 0 else 1e-10
@@ -59,7 +57,7 @@ def mape_(a, b):
     return float(np.mean(np.abs((a - b) / d)))
 
 def sba_forecast(y, extra_periods=0, alpha=0.4, beta=0.4):
-    """son2.py'deki sba() ile ayni."""
+    """Syntetos-Boylan Approximation (SBA)."""
     demand, intervals, last = [], [], None
     for t, v in enumerate(y):
         if v > 0:
@@ -79,7 +77,7 @@ def sba_forecast(y, extra_periods=0, alpha=0.4, beta=0.4):
     return np.array([(1 - beta / 2) * z / p] * extra_periods)
 
 def croston_forecast(y, extra_periods, smoothing=0.4):
-    """sktime Croston(smoothing) ile ayni: boyut ve araligi ayni katsayiyla duzlestir."""
+    """Same as sktime Croston(smoothing): size and interval smoothed with the same coefficient."""
     demand, intervals, last = [], [], None
     for t, v in enumerate(y):
         if v > 0:
@@ -102,7 +100,7 @@ def create_sequences(X, y, time_steps=TIME_STEPS):
 
 MODELS = ['CTR', 'CTR_Regression', 'FNN', 'RNN', 'LSTM', 'SES', 'Croston', 'SBA']
 
-# ----------------------------------------------------------------- tek SKU
+# ----------------------------------------------------------------- single SKU
 def run_one(pid, dates, sales):
     import tensorflow as tf
     from tensorflow.keras.models import Model
@@ -114,22 +112,22 @@ def run_one(pid, dates, sales):
 
     np.random.seed(SEED); tf.random.set_seed(SEED)
 
-    df = pd.DataFrame({'URUNID': pid, 'Date': pd.to_datetime(dates), 'Satis Adet': sales})
+    df = pd.DataFrame({'ProductID': pid, 'Date': pd.to_datetime(dates), 'Sales': sales})
     df['Day'] = df.Date.dt.day; df['Month'] = df.Date.dt.month; df['Year'] = df.Date.dt.year
     df['DayOfWeek'] = df.Date.dt.dayofweek
     df['IsWeekend'] = (df.DayOfWeek >= 5).astype(int)
-    df['Lag_1'] = df['Satis Adet'].shift(1)
-    df['Lag_2'] = df['Satis Adet'].shift(2)
-    df['Lag_3'] = df['Satis Adet'].shift(3)
-    df['Rolling_Mean_3'] = df['Satis Adet'].shift(1).rolling(3).mean()
-    df['Rolling_Mean_7'] = df['Satis Adet'].shift(1).rolling(7).mean()
+    df['Lag_1'] = df['Sales'].shift(1)
+    df['Lag_2'] = df['Sales'].shift(2)
+    df['Lag_3'] = df['Sales'].shift(3)
+    df['Rolling_Mean_3'] = df['Sales'].shift(1).rolling(3).mean()
+    df['Rolling_Mean_7'] = df['Sales'].shift(1).rolling(7).mean()
     df = df.dropna()
     if len(df) < TIME_STEPS:
         return None
 
-    X = df[['URUNID','Day','Month','Year','DayOfWeek','IsWeekend',
+    X = df[['ProductID','Day','Month','Year','DayOfWeek','IsWeekend',
             'Lag_1','Lag_2','Lag_3','Rolling_Mean_3','Rolling_Mean_7']].values.astype(np.float64)
-    y = df['Satis Adet'].values.astype(np.float64)
+    y = df['Sales'].values.astype(np.float64)
 
     test_size = int(len(X) * 0.15); val_size = int(len(X) * 0.15)
     if test_size == 0 or val_size == 0 or len(X) - test_size - val_size < 1:
@@ -178,7 +176,7 @@ def run_one(pid, dates, sales):
     score('CTR', np.where(ct > best_alpha, rt, 0.0))
     P['_ctr_prob'] = ct; P['_ctr_raw'] = rt
 
-    # ---- CTR_Regression (ablasyon)
+    # ---- CTR_Regression (ablation)
     i2 = Input(shape=(Xtr2.shape[1],))
     g = Dense(64, activation='relu')(i2); g = Dense(64, activation='relu')(g); o2 = Dense(1)(g)
     m2 = Model(i2, o2); m2.compile(optimizer='adam', loss='mean_absolute_error', steps_per_execution=SPE)
@@ -192,7 +190,7 @@ def run_one(pid, dates, sales):
     m3.fit(Xtr2, ytr, epochs=50, verbose=0)
     score('FNN', np.asarray(m3(Xte2, training=False)).flatten())
 
-    # ---- RNN (esikli)
+    # ---- RNN (thresholded)
     i4 = Input(shape=(TIME_STEPS, Xtr.shape[-1]))
     o4 = Dense(1)(LSTM(50, activation='relu')(i4))
     m4 = Model(i4, o4); m4.compile(optimizer='adam', loss='mean_absolute_error', steps_per_execution=SPE)
@@ -212,7 +210,7 @@ def run_one(pid, dates, sales):
     m5m.fit(Xtr, ytr, validation_data=(Xva, yva), epochs=50, verbose=0)
     score('LSTM', np.asarray(m5m(Xte, training=False)).flatten())
 
-    # ---- istatistiksel
+    # ---- statistical
     score('SES', SimpleExpSmoothing(ytr, initialization_method='estimated').fit(optimized=True).forecast(len(yte)))
     score('Croston', croston_forecast(y[:len(y)-test_size], len(yte)))
     score('SBA', sba_forecast(ytr, extra_periods=len(yte)))
@@ -228,7 +226,7 @@ def run_one(pid, dates, sales):
                        'CTR_prob': P['_ctr_prob'], 'CTR_raw': P['_ctr_raw']})
     return met, pr
 
-# ----------------------------------------------------------------- ilerleme
+# ----------------------------------------------------------------- progress
 _CNT = _TOT = _T0 = _OUT = _RECENT = None
 
 def pool_init(cnt, tot, t0, outdir, recent=None):
@@ -237,20 +235,20 @@ def pool_init(cnt, tot, t0, outdir, recent=None):
 
 def _hms(sec):
     sec = int(max(sec, 0)); h, m = divmod(sec, 3600); m, s = divmod(m, 60)
-    return f'{h:d}sa {m:02d}dk' if h else f'{m:d}dk {s:02d}sn'
+    return f'{h:d}h {m:02d}m' if h else f'{m:d}m {s:02d}s'
 
 def tick(wid, pid, sku_sec, note=''):
-    """Her SKU sonrasi ortak sayaci ilerletip tek satir ilerleme basar."""
+    """Advance the shared counter after each SKU and print a one-line progress report."""
     if _CNT is None:
         return
     with _CNT.get_lock():
         _CNT.value += 1
         done = _CNT.value
     el   = time.time() - _T0
-    rate = el / done                      # kosu basindan beri ortalama
+    rate = el / done                      # average since start of run
     now  = time.time()
     rrate = rate
-    if _RECENT is not None:               # SON 200 SKU'nun gercek hizi
+    if _RECENT is not None:               # actual speed over the LAST 200 SKUs
         try:
             _RECENT.append(now)
             while len(_RECENT) > 200:
@@ -265,8 +263,8 @@ def tick(wid, pid, sku_sec, note=''):
     pct  = 100.0 * done / _TOT
     bar  = '#' * int(pct / 2.5) + '.' * (40 - int(pct / 2.5))
     print(f'[{bar}] {done:>6}/{_TOT} {pct:5.1f}%  '
-          f'w{wid} SKU {pid}  {sku_sec:5.1f}sn  '
-          f'guncel {rrate:4.1f}sn (ort {rate:4.1f})  gecen {_hms(el)}  kalan ~{_hms(eta)}{note}', flush=True)
+          f'w{wid} SKU {pid}  {sku_sec:5.1f}s  '
+          f'recent {rrate:4.1f}s (avg {rate:4.1f})  elapsed {_hms(el)}  remaining ~{_hms(eta)}{note}', flush=True)
     if done % 25 == 0 or done == _TOT:
         try:
             with open(os.path.join(_OUT, 'progress.txt'), 'w') as f:
@@ -277,7 +275,7 @@ def tick(wid, pid, sku_sec, note=''):
         except Exception:
             pass
 
-# ----------------------------------------------------------------- isci
+# ----------------------------------------------------------------- worker
 def worker(args):
     wid, pids, series, outdir = args
     try:
@@ -287,17 +285,17 @@ def worker(args):
         try: tf.config.set_visible_devices([], 'GPU')
         except Exception: pass
     except Exception as e:
-        print('TF yuklenemedi:', e, flush=True); raise
+        print('TensorFlow could not be loaded:', e, flush=True); raise
     buf_m, buf_p, k, t0, nok = [], [], 0, time.time(), 0
     for j, pid in enumerate(pids):
         ts = time.time()
         try:
             r = run_one(int(pid), series[j][0], series[j][1])
         except Exception as e:
-            tick(wid, pid, time.time()-ts, f'  << HATA {type(e).__name__}: {e}')
+            tick(wid, pid, time.time()-ts, f'  << ERROR {type(e).__name__}: {e}')
             continue
         if r is None:
-            tick(wid, pid, time.time()-ts, '  << atlandi (yetersiz veri)')
+            tick(wid, pid, time.time()-ts, '  << skipped (insufficient data)')
             continue
         buf_m.extend(r[0]); buf_p.append(r[1]); nok += 1
         tick(wid, pid, time.time()-ts)
@@ -306,51 +304,39 @@ def worker(args):
         pd.concat(buf_p).to_csv(f'{outdir}/parts/prd_t{wid}.csv', index=False)
     return wid, nok, time.time()-t0
 
-# ----------------------------------------------------------------- ana
+# ----------------------------------------------------------------- main
 def load_dataset(name, limit=None):
-    """meta (URUNID) ve SKU basina (tarihler, satislar) listesi dondurur.
+    """Return meta (ProductID) and a per-SKU list of (dates, sales).
 
-    ONEMLI: BTM tarafinda seriler DUZENSIZ uzunluktadir. son2.py her SKU'nun
-    satirlarini CSV'deki haliyle isler; takvim bosluklarini doldurmaz ve
-    Lag_1 bir onceki SATIR'dir, bir onceki takvim gunu degil. Ayni davranis
-    burada da korunur. M5 matrisi zaten her gun dolu oldugu icin etkilenmez.
+    Lag features are computed on consecutive rows. The prepared M5 matrix
+    has an observation for every calendar day, so rows equal days.
     """
-    if name == 'm5':
-        meta  = pd.read_csv(f'{M5_PREP}/skus.csv')
-        dates = pd.read_csv(f'{M5_PREP}/dates.csv')['Date'].tolist()
-        mat   = np.load(f'{M5_PREP}/sales.npy')
-        if limit:
-            meta, mat = meta.iloc[:limit].copy(), mat[:limit]
-        series = [(dates, mat[i].astype(np.float64)) for i in range(len(meta))]
-    else:
-        d = pd.read_csv(BTM_CSV)
-        pids, series = [], []
-        for pid, grp in d.groupby('URUNID', sort=False):      # dosya sirasi korunur
-            pids.append(pid)
-            series.append((grp['Date'].tolist(), grp['Satis Adet'].to_numpy(dtype=np.float64)))
-        meta = pd.DataFrame({'URUNID': pids})
-        if limit:
-            meta, series = meta.iloc[:limit].copy(), series[:limit]
+    meta  = pd.read_csv(f'{M5_PREP}/skus.csv')
+    dates = pd.read_csv(f'{M5_PREP}/dates.csv')['Date'].tolist()
+    mat   = np.load(f'{M5_PREP}/sales.npy')
+    if limit:
+        meta, mat = meta.iloc[:limit].copy(), mat[:limit]
+    series = [(dates, mat[i].astype(np.float64)) for i in range(len(meta))]
     return meta, series
 
 
 def main():
     global CHUNK
     ap = argparse.ArgumentParser()
-    ap.add_argument('--dataset', choices=['m5','btm'], required=True)
+    ap.add_argument('--dataset', choices=['m5'], default='m5')
     ap.add_argument('--out', required=True)
     ap.add_argument('--limit', type=int, default=None)
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 2))
     ap.add_argument('--chunk', type=int, default=CHUNK,
-                    help='bir gorevde islenecek SKU sayisi; her gorevden sonra isci sureci yenilenir')
+                    help='SKUs per task; the worker process is restarted after each task')
     ap.add_argument('--shard', default=None,
-                    help='i/N -> SKU listesinin sadece i. dilimini isle')
+                    help='i/N -> process only the i-th slice of the SKU list')
     a = ap.parse_args()
 
     CHUNK = max(1, a.chunk)
     outdir = os.path.abspath(a.out)
     os.makedirs(f'{outdir}/parts', exist_ok=True)
-    print('veri yukleniyor...', flush=True)
+    print('loading data...', flush=True)
     meta, series = load_dataset(a.dataset, a.limit)
 
     import glob
@@ -358,33 +344,33 @@ def main():
     for f in glob.glob(f'{outdir}/parts/met_*.csv'):
         try: done |= set(pd.read_csv(f, usecols=['Product_ID']).Product_ID.unique().tolist())
         except Exception: pass
-    todo = [i for i, p in enumerate(meta.URUNID.tolist()) if p not in done]
+    todo = [i for i, p in enumerate(meta.ProductID.tolist()) if p not in done]
     if a.shard:
         si, sn = (int(x) for x in a.shard.split('/'))
         todo = todo[si::sn]
 
     W = max(1, a.workers)
     print('=' * 96)
-    print(f'  veri seti     : {a.dataset}')
-    print(f'  toplam SKU    : {len(meta)}')
-    print(f'  bitmis        : {len(done)}')
-    print(f'  bu kosuda     : {len(todo)}' + (f'   (dilim {a.shard})' if a.shard else ''))
-    print(f'  isci sayisi   : {W}   (makinede {os.cpu_count()} cekirdek)')
-    print(f'  cikti         : {outdir}')
+    print(f'  dataset       : {a.dataset}')
+    print(f'  total SKUs    : {len(meta)}')
+    print(f'  completed     : {len(done)}')
+    print(f'  this run      : {len(todo)}' + (f'   (slice {a.shard})' if a.shard else ''))
+    print(f'  workers       : {W}   ({os.cpu_count()} cores on this machine)')
+    print(f'  output        : {outdir}')
     print('=' * 96, flush=True)
     if not todo:
-        print('yapilacak is yok - hepsi bitmis.'); return
+        print('nothing to do - all SKUs completed.'); return
 
-    # --- GOREVLERI KUCUK PARCALARA BOL ---------------------------------------
-    # Her gorev CHUNK kadar SKU isler ve maxtasksperchild=1 sayesinde gorev
-    # bitince ISCI SURECI OLUR, yenisi dogar. TensorFlow'un iade etmedigi bellek
-    # boylece her parcada isletim sistemine geri verilir; kosu yavaslamaz.
-    # Maliyet: parca basina ~5 sn TF import suresi (SKU basina ~0.2 sn).
+    # --- SPLIT THE WORK INTO SMALL TASKS ------------------------------------
+    # Each task processes CHUNK SKUs and, with maxtasksperchild=1, the worker
+    # process exits after the task and a new one is started. Memory that
+    # TensorFlow does not release is thus returned to the OS after every task,
+    # so the run does not slow down. Cost: ~5 s TF import per task (~0.2 s per SKU).
     tasks = []
     for k, i in enumerate(range(0, len(todo), CHUNK)):
         idxs = todo[i:i + CHUNK]
-        tasks.append((k, meta.URUNID.values[idxs], [series[j] for j in idxs], outdir))
-    print(f'  gorev sayisi  : {len(tasks)}  ({CHUNK} SKU/gorev, her gorevden sonra isci yenilenir)')
+        tasks.append((k, meta.ProductID.values[idxs], [series[j] for j in idxs], outdir))
+    print(f'  tasks         : {len(tasks)}  ({CHUNK} SKUs/task, worker restarted after each task)')
     print('=' * 96, flush=True)
 
     json.dump(dict(dataset=a.dataset, n_sku=len(meta), todo=len(todo), workers=W,
@@ -409,8 +395,8 @@ def main():
                 pass
     el = time.time() - t0
     print('=' * 96)
-    print(f'BITTI  |  {len(todo)} SKU  |  toplam {_hms(el)}  |  {el/max(len(todo),1):.1f} sn/SKU')
-    print(f'sonuclar: {outdir}/parts/   (birlestirmek icin: python3 merge_results.py {outdir})')
+    print(f'DONE  |  {len(todo)} SKUs  |  total {_hms(el)}  |  {el/max(len(todo),1):.1f} s/SKU')
+    print(f'results: {outdir}/parts/   (to merge: python3 merge_results.py {outdir})')
     print('=' * 96)
 
 if __name__ == '__main__':
