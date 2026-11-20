@@ -14,9 +14,9 @@ Every model is initialised from the same fixed seed (42) for each series, so the
 run is reproducible.  Data preparation is imported unchanged from ctr_experiment.py.
 
 Usage:
-  python3 ctr_ablation.py --dataset btm --out ../ablation_btm [--workers 8] [--limit N]
+  python3 ctr_ablation.py --dataset primary --out ../ablation_primary [--workers 8] [--limit N]
   python3 ctr_ablation.py --dataset m5  --out ../ablation_m5  [--workers 8] [--sample 5000]
-  python3 ctr_ablation.py --merge ../ablation_btm
+  python3 ctr_ablation.py --merge ../ablation_primary
 """
 import os, sys, gc, json, time, argparse, warnings
 warnings.filterwarnings('ignore')
@@ -234,7 +234,7 @@ def merge(outdir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--dataset', choices=['btm', 'm5'])
+    ap.add_argument('--dataset', choices=['primary', 'm5'])
     ap.add_argument('--out'); ap.add_argument('--workers', type=int, default=8)
     ap.add_argument('--limit', type=int); ap.add_argument('--sample', type=int)
     ap.add_argument('--merge')
