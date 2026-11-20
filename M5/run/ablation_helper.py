@@ -33,7 +33,7 @@ def helper(hid, lock, claimed):
     import numpy as np, pandas as pd
     import ctr_ablation as AB, ctr_experiment as CE
     meta, series = CE.load_dataset('m5', None)[:2]
-    pos = {int(p): i for i, p in enumerate(meta['URUNID'])}
+    pos = {int(p): i for i, p in enumerate(meta['ProductID'])}
     wid = MAIN_WORKERS + hid
     path, ppath = f'{OUT}/parts/abl_w{wid}.csv', f'{OUT}/preds/prd_w{wid}.csv'
     while True:

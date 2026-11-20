@@ -234,15 +234,20 @@ def merge(outdir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--dataset', choices=['primary', 'm5'])
+    ap.add_argument('--dataset', choices=['primary', 'm5'],
+                    help="'m5' runs from the released preparation files; 'primary' requires the proprietary "
+                         "catalogue, which is not distributed (see README)")
     ap.add_argument('--out'); ap.add_argument('--workers', type=int, default=8)
     ap.add_argument('--limit', type=int); ap.add_argument('--sample', type=int)
     ap.add_argument('--merge')
     a = ap.parse_args()
     if a.merge:
         return merge(a.merge)
-    meta, series = CE.load_dataset(a.dataset, a.limit)[:2]
-    pids = list(meta['URUNID'])
+    if a.dataset == 'primary':
+        sys.exit('The primary catalogue is proprietary and is not distributed; '
+                 'its ablation results are released in M5/results_ablation/primary/.')
+    meta, series = CE.load_dataset('m5', a.limit)[:2]
+    pids = list(meta['ProductID'])
     if a.sample and a.sample < len(pids):
         rng = np.random.default_rng(SEED)
         keep = sorted(rng.choice(len(pids), a.sample, replace=False))
