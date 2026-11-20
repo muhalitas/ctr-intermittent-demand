@@ -300,6 +300,7 @@ for idx, product_id in enumerate(tqdm(unique_product_ids, desc="Processing Produ
         'CTR_Predictions': ctr_preds
     }))
 
+    # NOTE: legacy baseline kept for completeness of the original run; it is not part of the comparison reported in the paper. The controlled ablation of Section 4.8 is in M5/run/ctr_ablation.py.
     # CTR_Regression with Timing
     start_ctr_reg = time.time()
     input_layer_reg = Input(shape=(X_train_scaled.shape[1],))

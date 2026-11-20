@@ -5,12 +5,14 @@ Code and released results for the manuscript "The Classify-Then-Regress Architec
 CTR forecasts intermittent demand with a single LSTM encoder shared by two heads: a classification head that estimates whether demand occurs on a given day, and a regression head that estimates its size. Both heads are trained jointly (loss = 0.5 · binary cross-entropy + 0.5 · a weighted absolute-error loss that gives non-zero days three times the weight). The final forecast is the regression output on days where the occurrence probability exceeds a per-SKU threshold τ\*, selected on the validation split, and zero otherwise.
 
 ## Contents
-- `son2.py` — full pipeline for the primary catalogue: feature construction, chronological 70/15/15 split, CTR and all benchmark models (FNN, RNN, LSTM, CTR_Regression, SES, Croston, SBA), per-SKU threshold search, metrics and summary tables.
+- `son2.py` — full pipeline for the primary catalogue: feature construction, chronological 70/15/15 split, CTR and all benchmark models (FNN, RNN, LSTM, SES, Croston, SBA), per-SKU threshold search, metrics and summary tables.
 - `sb_classify_definitive.py` — Syntetos–Boylan (ADI, CV²) classification of the analytical sample.
 - `M5/prep/m5_prepare.py` — selection of the external catalogue: final 1,095 days of the M5 horizon (2013-05-24 to 2016-05-22), ADI > 1.32 and at least 30 non-zero observations (27,853 of 30,490 series).
 - `M5/run/ctr_experiment.py`, `merge_results.py`, `run.sh` — the same protocol run on the external catalogue (seed 42), with resumable parallel execution and result merging.
 - `M5/prep/skus.csv.gz` — the 27,853 selected M5 series (M5 identifiers, ADI, zero rate).
-- `M5/results_m5/combined_results_part1.csv.gz` and `_part2.csv.gz` — per-series metrics of all eight models on the external catalogue (split by model to respect file-size limits; concatenate the two to obtain the full table); `table*.csv` — summary tables.
+- `M5/results_m5/combined_results_part1.csv.gz` to `_part4.csv.gz` — per-series metrics of CTR and the six benchmarks on the external catalogue (split by model to respect file-size limits; concatenate the four parts to obtain the full table); `table*.csv` — summary tables.
+- `M5/run/ctr_ablation.py`, `ablation_helper.py`, `run_ablation.sh` — ablation of Section 4.8 (CTR_full, CTR_nogate, CTR_reghead; seed 42) on the primary catalogue (all 4,256 SKUs) and on 5,000 M5 series drawn with seed 42.
+- `M5/results_ablation/primary/` and `M5/results_ablation/m5/` — per-SKU/per-series ablation results (`ablation_per_sku.csv.gz`, `ablation_per_series.csv.gz`), summaries (`ablation_summary.csv`, Table 10) and paired tests (`ablation_paired.csv`, Table 11); primary SKU codes use the same random re-coding as `results_primary/`; `series_ids.csv` lists the 5,000 M5 series.
 - `figures/` — scripts generating the manuscript figures.
 - `analysis/allzero_analysis.py` — always-zero reference analysis.
 
