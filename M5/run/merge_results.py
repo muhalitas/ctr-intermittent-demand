@@ -14,6 +14,7 @@ Outputs:
 import sys, os, glob, argparse
 import numpy as np, pandas as pd
 
+# CTR_Regression: NOTE: legacy baseline kept for completeness of the original run; it is not part of the comparison reported in the paper. The controlled ablation of Section 4.8 is in M5/run/ctr_ablation.py.
 MODELS = ['SES','Croston','SBA','CTR_Regression','FNN','RNN','LSTM','CTR']
 NEURAL = ['CTR_Regression','FNN','RNN','LSTM','CTR']
 BINS   = [0.0,0.2,0.3,0.4,0.5,0.6,0.7,0.8,1.0001]

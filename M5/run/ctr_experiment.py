@@ -176,7 +176,8 @@ def run_one(pid, dates, sales):
     score('CTR', np.where(ct > best_alpha, rt, 0.0))
     P['_ctr_prob'] = ct; P['_ctr_raw'] = rt
 
-    # ---- CTR_Regression (ablation)
+    # NOTE: legacy baseline kept for completeness of the original run; it is not part of the comparison reported in the paper. The controlled ablation of Section 4.8 is in M5/run/ctr_ablation.py.
+    # ---- CTR_Regression
     i2 = Input(shape=(Xtr2.shape[1],))
     g = Dense(64, activation='relu')(i2); g = Dense(64, activation='relu')(g); o2 = Dense(1)(g)
     m2 = Model(i2, o2); m2.compile(optimizer='adam', loss='mean_absolute_error', steps_per_execution=SPE)
