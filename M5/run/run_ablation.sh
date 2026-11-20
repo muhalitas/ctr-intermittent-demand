@@ -17,10 +17,11 @@ if [ ! -d "$VENV" ]; then
 fi
 "$VENV"/bin/python -c "import tensorflow as tf; print('TF', tf.__version__)"
 
-echo "==> 1/2 primary catalogue (4,256 SKUs)"
-caffeinate -dims "$VENV"/bin/python ctr_ablation.py --dataset primary --out ../ablation_primary --workers "$WORKERS"
+# keep a macOS machine awake during the run if caffeinate is available
+if command -v caffeinate >/dev/null 2>&1; then KEEP="caffeinate -dims"; else KEEP=""; fi
 
-echo "==> 2/2 M5 (random 5,000 series, seed 42)"
-caffeinate -dims "$VENV"/bin/python ctr_ablation.py --dataset m5 --out ../ablation_m5 --workers "$WORKERS" --sample 5000
+# The primary catalogue is proprietary; its ablation results are released in ../results_ablation/primary/.
+echo "==> M5 (random 5,000 series, seed 42); requires M5/prep outputs (run M5/prep/m5_prepare.py first)"
+$KEEP "$VENV"/bin/python ctr_ablation.py --dataset m5 --out ../ablation_m5 --workers "$WORKERS" --sample 5000
 
-echo "==> done. Results: ../ablation_primary/ablation_summary.csv and ../ablation_m5/ablation_summary.csv"
+echo "==> done. Results: ../ablation_m5/ablation_summary.csv"
