@@ -1,0 +1,4 @@
+pair,better,worse,ties,median_diff,wilcoxon_p
+CTR_full vs CTR_nogate,3869,136,251,0.0170018642922072,0.0
+CTR_full vs CTR_reghead,3983,231,42,0.0160973605158239,0.0
+CTR_nogate vs CTR_reghead,2155,2091,10,0.0001947629230105,0.0947377894127663
