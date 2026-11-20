@@ -16,6 +16,6 @@ print(x.pivot_table(index="sparsity_band_table3", columns="model", values="MAE",
 
 w = m.pivot(index="sku", columns="model", values="MAE")
 print("Table 4 - paired per-SKU MAE (CTR better / worse / tie):")
-for comp in ["CTR_Reg", "FNN", "RNN", "LSTM", "SES", "Croston", "SBA"]:
+for comp in ["FNN", "RNN", "LSTM", "SES", "Croston", "SBA"]:
     d = w[comp] - w["CTR"]
     print(f"  CTR vs {comp:8s} {int((d > 0).sum()):5d} / {int((d < 0).sum()):5d} / {int((d == 0).sum()):5d}")
