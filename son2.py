@@ -21,7 +21,7 @@ from sktime.forecasting.base import ForecastingHorizon
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Output directory (HPC uyumlu) ---
+# --- Output directory ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(BASE_DIR, 'Veri')
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -584,8 +584,8 @@ sparsity_agg_df = pd.DataFrame(sparsity_agg_data)
 sparsity_agg_df.to_csv(os.path.join(OUT_DIR, 'sparsity_metrics.csv'), index=False)
 
 # -------------------------------------------------------
-# Mann-Whitney U testi: CTR vs diger modeller (MAE, sMAPE, MASE)
-# Istatistiksel anlamlilik icin (makale icin gerekli)
+# Unpaired Mann-Whitney U test: CTR vs the other models (MAE, sMAPE, MASE); exploratory output of the original run.
+# The paired Wilcoxon signed-rank tests reported in the paper are computed from the per-SKU results.
 # -------------------------------------------------------
 mw_results = []
 ctr_mae_vals  = [all_results[pid]['CTR']['MAE']   for pid in all_results]
