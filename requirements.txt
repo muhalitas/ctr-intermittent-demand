@@ -6,3 +6,6 @@ statsmodels
 scipy
 sktime
 tqdm
+lightgbm
+xgboost
+statsforecast
